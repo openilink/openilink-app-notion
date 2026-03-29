@@ -38,7 +38,7 @@ export class HubClient {
   async sendMessage(params: SendMessageParams): Promise<void> {
     const url = `${this.hubUrl}/bot/v1/message/send`;
     const payload: Record<string, string> = {
-      user_id: params.userId,
+      to: params.userId,
       type: "text",
       content: params.text,
     };

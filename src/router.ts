@@ -63,11 +63,12 @@ export class Router {
       return `未知命令：${command}。可用命令：${this.definitions.map((d) => d.command).join("、")}`;
     }
 
-    // 构建执行上下文
+    // 构建执行上下文，优先使用 sender.id
+    const sender = (eventData as any).sender;
     const ctx: ToolContext = {
       installationId: event.installation_id,
       botId: event.bot.id,
-      userId: (eventData.user_id as string) || "",
+      userId: (sender?.id ?? (eventData as any).user_id ?? (eventData as any).from ?? "") as string,
       traceId: event.trace_id,
       args,
     };
@@ -92,7 +93,10 @@ export class Router {
     const result = await this.handleCommand(event);
     if (result === undefined) return;
 
-    const userId = (event.event?.data?.user_id as string) || "";
+    // 优先使用 sender.id
+    const evtData = event.event?.data;
+    const evtSender = (evtData as any)?.sender;
+    const userId = (evtSender?.id ?? (evtData as any)?.user_id ?? (evtData as any)?.from ?? "") as string;
     if (!userId) return;
 
     try {

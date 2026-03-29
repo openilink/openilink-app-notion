@@ -149,7 +149,10 @@ export async function handleWebhook(
           resultPromise
             .then(async (asyncResult) => {
               if (asyncResult) {
+                // 优先使用 sender.id
+                const wSender = (event.event?.data as any)?.sender;
                 const userId =
+                  (wSender?.id as string) ??
                   (event.event?.data?.user_id as string) ??
                   (event.event?.data?.from as string) ??
                   "";
