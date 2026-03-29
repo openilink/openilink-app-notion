@@ -1,50 +1,105 @@
 /**
- * 集成测试通用工具
- * 用于与 OpeniLink Hub Mock Server 交互
+ * 集成测试工具类 - 与 Mock Hub Server 交互
  */
+import http from "node:http";
+import {
+  createMockHub,
+  getSentMessages,
+  resetSentMessages,
+  WEBHOOK_SECRET,
+  APP_TOKEN,
+  INSTALLATION_ID,
+  BOT_ID,
+} from "./mock-hub.js";
 
-export const MOCK_HUB_URL = "http://localhost:9801";
-export const MOCK_APP_TOKEN = "mock_app_token";
+/** Mock Server 端口配置 */
+export const MOCK_HUB_PORT = 9821;
+export const MOCK_HUB_URL = `http://localhost:${MOCK_HUB_PORT}`;
+export const MOCK_APP_TOKEN = APP_TOKEN;
+export const MOCK_WEBHOOK_SECRET = WEBHOOK_SECRET;
+export const MOCK_INSTALLATION_ID = INSTALLATION_ID;
+export const MOCK_BOT_ID = BOT_ID;
+
+/** App 的 webhook 端口和地址 */
+export const APP_PORT = 9822;
+export const APP_WEBHOOK_URL = `http://localhost:${APP_PORT}/hub/webhook`;
 
 /**
- * 向 Mock Server 注入一条模拟消息
+ * 启动 Mock Hub Server 实例
+ * 返回 server 和清理函数
  */
-export async function injectMessage(sender: string, content: string): Promise<void> {
-  await fetch(`${MOCK_HUB_URL}/mock/event`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ sender, content }),
+export function startMockHub(): Promise<{
+  server: http.Server;
+  close: () => Promise<void>;
+}> {
+  return new Promise((resolve, reject) => {
+    const server = createMockHub(MOCK_HUB_PORT, APP_WEBHOOK_URL);
+    server.on("error", reject);
+    server.listen(MOCK_HUB_PORT, () => {
+      console.log(`[setup] Mock Hub Server 已启动，端口 ${MOCK_HUB_PORT}`);
+      resolve({
+        server,
+        close: () =>
+          new Promise<void>((res) =>
+            server.close(() => {
+              console.log("[setup] Mock Hub Server 已关闭");
+              res();
+            }),
+          ),
+      });
+    });
   });
 }
 
 /**
- * 获取 Mock Server 记录的所有消息
+ * 注入模拟微信消息到 Mock Server
+ * Mock Server 会将该消息作为 Hub 事件推送给 App 的 webhook
+ */
+export async function injectMessage(
+  sender: string,
+  content: string,
+): Promise<void> {
+  const res = await fetch(`${MOCK_HUB_URL}/mock/event`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sender, content }),
+  });
+  if (!res.ok) {
+    throw new Error(`注入消息失败: ${res.status} ${await res.text()}`);
+  }
+}
+
+/**
+ * 获取 App 发送到 Mock Server 的消息列表
+ * 同进程直接获取（更快更可靠）
  */
 export async function getMessages(): Promise<any[]> {
-  const res = await fetch(`${MOCK_HUB_URL}/mock/messages`);
-  const data = await res.json();
-  return data.store_messages ?? data.messages ?? [];
+  return getSentMessages();
 }
 
 /**
  * 重置 Mock Server 状态
+ * 每个测试用例前调用，确保测试隔离
  */
 export async function resetMock(): Promise<void> {
-  await fetch(`${MOCK_HUB_URL}/mock/reset`, { method: "POST" });
+  resetSentMessages();
 }
 
 /**
- * 轮询等待条件满足，超时抛出错误
+ * 等待条件满足（轮询）
+ * @param fn - 条件判断函数，返回 true 表示条件满足
+ * @param timeoutMs - 超时时间，默认 10 秒
+ * @param intervalMs - 轮询间隔，默认 200 毫秒
  */
 export async function waitFor(
   fn: () => Promise<boolean>,
-  timeoutMs = 5000,
+  timeoutMs = 10_000,
   intervalMs = 200,
 ): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
     if (await fn()) return;
-    await new Promise((r) => setTimeout(r, intervalMs));
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
-  throw new Error("waitFor 超时");
+  throw new Error(`等待超时：${timeoutMs}ms 内条件未满足`);
 }
