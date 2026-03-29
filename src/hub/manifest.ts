@@ -16,6 +16,10 @@ export interface AppManifest {
   description: string;
   /** 订阅的事件类型列表 */
   events: string[];
+  /** 配置表单 JSON Schema */
+  config_schema?: Record<string, unknown>;
+  /** 安装引导说明（Markdown） */
+  guide?: string;
 }
 
 /** Notion Bridge 应用清单 */
@@ -25,4 +29,13 @@ export const manifest: AppManifest = {
   icon: "\uD83D\uDCDD",
   description: "微信 ↔ Notion 双向桥接，支持消息同步与 Notion AI Tools",
   events: ["message", "command"],
+  config_schema: {
+    type: "object",
+    properties: {
+      notion_token: { type: "string", title: "Notion Integration Token", description: "以 ntn_ 开头的集成令牌" },
+      notion_database_id: { type: "string", title: "Notion 数据库 ID", description: "默认写入的数据库 ID（可选）" },
+    },
+    required: ["notion_token"],
+  },
+  guide: "## Notion 安装指南\n### 第 1 步\n访问 [notion.so/profile/integrations](https://www.notion.com/profile/integrations) 创建集成\n### 第 2 步\n复制 Token（ntn_ 开头）\n### 第 3 步\n在 Notion 页面/数据库设置中「连接」到你的集成\n### 第 4 步\n填写上方配置并安装",
 };
