@@ -24,7 +24,7 @@ import { handleWebhook } from "./hub/webhook.js";
 import { handleOAuthStart, handleOAuthCallback } from "./hub/oauth.js";
 import { manifest } from "./hub/manifest.js";
 import { HubClient } from "./hub/client.js";
-import type { HubEvent } from "./hub/types.js";
+import type { HubEvent, Installation } from "./hub/types.js";
 
 // ─── 初始化 ────────────────────────────────────────────────
 
@@ -64,7 +64,7 @@ if (config.notionDatabaseId) {
 // ─── Hub 事件处理 ─────────────────────────────────────────
 
 /** 获取 HubClient 实例（用于异步回复等场景） */
-function getHubClient(installation: import("./hub/types.js").Installation): HubClient {
+function getHubClient(installation: Installation): HubClient {
   return new HubClient(installation.hubUrl, installation.appToken);
 }
 
@@ -120,7 +120,7 @@ async function onEvent(event: HubEvent): Promise<void> {
  * 处理 command 事件（同步/异步超时由 webhook 层控制）
  * 返回工具执行结果文本，null 表示无需回复
  */
-async function onCommand(event: HubEvent, _installation: import("./hub/types.js").Installation): Promise<string | null> {
+async function onCommand(event: HubEvent, _installation: Installation): Promise<string | null> {
   console.log(`[event] 收到 command 事件: id=${event.event?.id}, trace=${event.trace_id}`);
   const result = await router.handleCommand(event);
   return result ?? null;

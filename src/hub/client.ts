@@ -2,16 +2,10 @@
  * Hub Bot API 客户端
  *
  * 封装与 Hub 的 HTTP 通信，提供发送消息、上报工具定义等能力。
+ * Bot API 路径前缀: /bot/v1
  */
 
 import type { ToolDefinition } from "./types.js";
-
-/** Hub API 响应基础结构 */
-interface HubResponse<T = unknown> {
-  ok: boolean;
-  data?: T;
-  error?: string;
-}
 
 /** 发送消息请求参数 */
 export interface SendMessageParams {
@@ -21,12 +15,6 @@ export interface SendMessageParams {
   text: string;
   /** 链路追踪 ID */
   traceId?: string;
-}
-
-/** 发送消息响应 */
-export interface SendMessageResult {
-  /** 消息 ID */
-  messageId: string;
 }
 
 /**
@@ -45,51 +33,38 @@ export class HubClient {
 
   /**
    * 发送文本消息给指定用户
+   * POST /bot/v1/message/send
    */
-  async sendMessage(params: SendMessageParams): Promise<SendMessageResult> {
-    const resp = await this.request<SendMessageResult>("/api/bot/message", {
+  async sendMessage(params: SendMessageParams): Promise<void> {
+    const url = `${this.hubUrl}/bot/v1/message/send`;
+    const payload: Record<string, string> = {
+      user_id: params.userId,
+      type: "text",
+      content: params.text,
+    };
+    if (params.traceId) {
+      payload.trace_id = params.traceId;
+    }
+
+    const resp = await fetch(url, {
       method: "POST",
-      body: {
-        user_id: params.userId,
-        text: params.text,
-        trace_id: params.traceId,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.appToken}`,
       },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(30_000),
     });
-    return resp;
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      throw new Error(`[hub-client] 发送消息失败: ${resp.status} - ${errText}`);
+    }
   }
 
   /**
-   * 发送 typing 状态
-   */
-  async sendTyping(userId: string): Promise<void> {
-    await this.request("/api/bot/typing", {
-      method: "POST",
-      body: { user_id: userId },
-    });
-  }
-
-  /**
-   * 上报工具定义到 Hub
-   */
-  async registerTools(tools: ToolDefinition[]): Promise<void> {
-    await this.request("/api/bot/tools", {
-      method: "PUT",
-      body: { tools },
-    });
-  }
-
-  /**
-   * 回复工具执行结果
-   */
-  async replyToolResult(traceId: string, result: string): Promise<void> {
-    await this.request("/api/bot/tool-result", {
-      method: "POST",
-      body: { trace_id: traceId, result },
-    });
-  }
-
-  /**
-   * 同步工具定义到 Hub（PUT /bot/v1/app/tools）
+   * 同步工具定义到 Hub
+   * PUT /bot/v1/app/tools
    */
   async syncTools(tools: ToolDefinition[]): Promise<void> {
     const url = `${this.hubUrl}/bot/v1/app/tools`;
@@ -106,43 +81,5 @@ export class HubClient {
       const errText = await resp.text();
       console.error(`[hub-client] syncTools 失败 [${resp.status}]: ${errText}`);
     }
-  }
-
-  /**
-   * 发送通用 HTTP 请求到 Hub API
-   */
-  private async request<T = unknown>(
-    path: string,
-    opts: { method: string; body?: unknown },
-  ): Promise<T> {
-    const url = `${this.hubUrl}${path}`;
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${this.appToken}`,
-    };
-
-    const resp = await fetch(url, {
-      method: opts.method,
-      headers,
-      body: opts.body ? JSON.stringify(opts.body) : undefined,
-    });
-
-    if (!resp.ok) {
-      const errText = await resp.text();
-      throw new Error(`Hub API 请求失败 [${resp.status}] ${path}: ${errText}`);
-    }
-
-    // 部分接口无返回体（204）
-    const contentType = resp.headers.get("content-type") || "";
-    if (!contentType.includes("application/json")) {
-      return undefined as T;
-    }
-
-    const json = (await resp.json()) as HubResponse<T>;
-    if (!json.ok) {
-      throw new Error(`Hub API 业务错误 ${path}: ${json.error || "未知错误"}`);
-    }
-
-    return json.data as T;
   }
 }

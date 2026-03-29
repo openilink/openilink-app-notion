@@ -6,11 +6,11 @@
 export interface HubEvent {
   /** 协议版本 */
   v: string;
-  /** 事件类型：event / challenge / install */
-  type: string;
+  /** 事件类型：event / url_verification */
+  type: "event" | "url_verification";
   /** 链路追踪 ID */
   trace_id: string;
-  /** 握手挑战值（type=challenge 时存在） */
+  /** 握手挑战值（type=url_verification 时存在） */
   challenge?: string;
   /** 安装实例 ID */
   installation_id: string;
