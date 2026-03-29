@@ -63,10 +63,14 @@ if (config.notionDatabaseId) {
 
 // ─── Hub 事件处理 ─────────────────────────────────────────
 
+/** 获取 HubClient 实例（用于异步回复等场景） */
+function getHubClient(installation: import("./hub/types.js").Installation): HubClient {
+  return new HubClient(installation.hubUrl, installation.appToken);
+}
+
 /**
- * 处理 Hub 推送的业务事件
+ * 处理 Hub 推送的普通事件（非 command）
  * - message → wxToNotion（微信消息写入 Notion）
- * - command → router（AI Tool 调用）
  */
 async function onEvent(event: HubEvent): Promise<void> {
   const subType = event.event?.type;
@@ -107,20 +111,24 @@ async function onEvent(event: HubEvent): Promise<void> {
       break;
     }
 
-    case "command": {
-      // AI Tool 命令 → 路由到对应处理函数
-      await router.handleAndReply(event, hubClient);
-      break;
-    }
-
     default:
       console.log(`[event] 未处理的事件类型: ${subType}`);
   }
 }
 
+/**
+ * 处理 command 事件（同步/异步超时由 webhook 层控制）
+ * 返回工具执行结果文本，null 表示无需回复
+ */
+async function onCommand(event: HubEvent, _installation: import("./hub/types.js").Installation): Promise<string | null> {
+  console.log(`[event] 收到 command 事件: id=${event.event?.id}, trace=${event.trace_id}`);
+  const result = await router.handleCommand(event);
+  return result ?? null;
+}
+
 // ─── HTTP Server ──────────────────────────────────────────
 
-const oauthOpts = { config, store };
+const oauthOpts = { config, store, tools: definitions };
 
 async function requestHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
@@ -129,7 +137,7 @@ async function requestHandler(req: IncomingMessage, res: ServerResponse): Promis
   try {
     // POST /hub/webhook — 接收 Hub 推送事件
     if (pathname === "/hub/webhook" && req.method === "POST") {
-      await handleWebhook(req, res, { store, onEvent });
+      await handleWebhook(req, res, { store, onEvent, onCommand, getHubClient });
       return;
     }
 
@@ -188,6 +196,18 @@ const server = createServer((req, res) => {
 server.listen(Number(config.port), () => {
   console.log(`[app] 服务已启动，监听端口 ${config.port}`);
   console.log(`[app] 路由: POST /hub/webhook | GET /oauth/setup | GET /oauth/redirect | GET /manifest.json | GET /health`);
+
+  // 启动时同步工具定义到所有已安装的 Hub 实例
+  const installations = store.getAllInstallations();
+  for (const inst of installations) {
+    const hubClient = new HubClient(inst.hubUrl, inst.appToken);
+    hubClient.syncTools(definitions).catch((err) => {
+      console.error(`[app] 启动同步工具失败 (installation=${inst.id}):`, err);
+    });
+  }
+  if (installations.length > 0) {
+    console.log(`[app] 正在向 ${installations.length} 个安装实例同步工具定义`);
+  }
 });
 
 // ─── 优雅关闭 ─────────────────────────────────────────────

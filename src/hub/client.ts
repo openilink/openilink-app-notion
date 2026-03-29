@@ -89,6 +89,26 @@ export class HubClient {
   }
 
   /**
+   * 同步工具定义到 Hub（PUT /bot/v1/app/tools）
+   */
+  async syncTools(tools: ToolDefinition[]): Promise<void> {
+    const url = `${this.hubUrl}/bot/v1/app/tools`;
+    const resp = await fetch(url, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.appToken}`,
+      },
+      body: JSON.stringify({ tools }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!resp.ok) {
+      const errText = await resp.text();
+      console.error(`[hub-client] syncTools 失败 [${resp.status}]: ${errText}`);
+    }
+  }
+
+  /**
    * 发送通用 HTTP 请求到 Hub API
    */
   private async request<T = unknown>(

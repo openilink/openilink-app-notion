@@ -6,25 +6,42 @@
  * 2. 验证 HMAC-SHA256 签名
  * 3. 处理 challenge 握手
  * 4. 将业务事件分发给注册的回调函数
+ * 5. command 事件支持同步/异步超时响应（SYNC_DEADLINE = 2500ms）
  */
 
 import { verifySignature } from "../utils/crypto.js";
 import type { Store } from "../store.js";
-import type { HubEvent } from "./types.js";
+import type { HubEvent, Installation } from "./types.js";
+import type { HubClient } from "./client.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-/** 事件处理回调函数类型 */
+/** 同步响应截止时间（毫秒） */
+const SYNC_DEADLINE_MS = 2500;
+
+/** 普通事件处理回调（无返回值） */
 export type EventHandler = (event: HubEvent) => Promise<void>;
+
+/** command 事件处理回调（返回结果文本） */
+export type CommandHandler = (event: HubEvent, installation: Installation) => Promise<string | null>;
+
+/** 获取 HubClient 实例的工厂函数 */
+export type HubClientFactory = (installation: Installation) => HubClient;
 
 /** Webhook 处理器配置 */
 export interface WebhookOptions {
   store: Store;
+  /** 普通事件回调（message 等） */
   onEvent?: EventHandler;
+  /** command 事件回调，返回工具执行结果 */
+  onCommand?: CommandHandler;
+  /** 获取 HubClient 工厂，用于超时后异步回复 */
+  getHubClient?: HubClientFactory;
 }
 
 /**
  * 处理 Webhook 请求（/webhook）
  * 验证签名 → 处理 challenge → 分发事件
+ * command 事件使用 SYNC_DEADLINE 做同步/异步超时控制
  */
 export async function handleWebhook(
   req: IncomingMessage,
@@ -83,14 +100,51 @@ export async function handleWebhook(
   }
 
   // 分发业务事件
-  if (event.type === "event" && opts.onEvent) {
-    try {
-      await opts.onEvent(event);
-    } catch (err) {
-      console.error("[webhook] 事件处理失败:", err);
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "事件处理失败" }));
+  if (event.type === "event") {
+    const subType = event.event?.type;
+
+    // command 事件：同步/异步超时处理
+    if (subType === "command" && opts.onCommand) {
+      const resultPromise = opts.onCommand(event, installation);
+      const timeoutPromise = new Promise<null>((resolve) =>
+        setTimeout(() => resolve(null), SYNC_DEADLINE_MS),
+      );
+      const result = await Promise.race([resultPromise, timeoutPromise]);
+
+      if (result !== null) {
+        // 在截止时间内拿到结果，同步返回
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ reply: result }));
+        return;
+      }
+
+      // 超时，通过 replyToolResult 异步推送工具执行结果
+      if (opts.getHubClient) {
+        const hubClient = opts.getHubClient(installation);
+        resultPromise
+          .then(async (asyncResult) => {
+            if (asyncResult) {
+              await hubClient.replyToolResult(event.trace_id, asyncResult);
+            }
+          })
+          .catch((err) => console.error("[webhook] 异步回复 command 失败:", err));
+      }
+
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ reply_async: true }));
       return;
+    }
+
+    // 其他事件（message 等）：原有逻辑
+    if (opts.onEvent) {
+      try {
+        await opts.onEvent(event);
+      } catch (err) {
+        console.error("[webhook] 事件处理失败:", err);
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "事件处理失败" }));
+        return;
+      }
     }
   }
 
