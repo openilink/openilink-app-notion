@@ -1,0 +1,21 @@
+version: "3.8"
+
+services:
+  notion-bridge:
+    build: .
+    container_name: openilink-app-notion
+    restart: unless-stopped
+    ports:
+      - "8087:8087"
+    environment:
+      - HUB_URL=${HUB_URL}
+      - BASE_URL=${BASE_URL}
+      - NOTION_TOKEN=${NOTION_TOKEN}
+      - NOTION_DATABASE_ID=${NOTION_DATABASE_ID:-}
+      - DB_PATH=/data/notion.db
+      - PORT=8087
+    volumes:
+      - notion-data:/data
+
+volumes:
+  notion-data:
