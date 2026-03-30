@@ -89,6 +89,27 @@ docker-compose up -d
 | `DB_PATH` | 否 | `data/notion.db` | SQLite 数据库文件路径 |
 | `PORT` | 否 | `8087` | HTTP 服务端口 |
 
+## 使用方式
+
+安装到 Bot 后，支持三种方式调用：
+
+### 自然语言（推荐）
+
+直接用微信跟 Bot 对话，Hub AI 会自动识别意图并调用对应功能：
+
+- "在 Notion 里创建一个页面叫会议纪要"
+- "搜一下 Notion 里关于产品规划的文档"
+
+### 命令调用
+
+也可以使用 `/命令名 参数` 的格式直接调用：
+
+- `/create_page --database_id xxx --title 会议纪要`
+
+### AI 自动调用
+
+Hub AI 在多轮对话中会自动判断是否需要调用本 App 的功能，无需手动触发。
+
 ## 15 个 AI Tools
 
 ### 搜索（1 个）
