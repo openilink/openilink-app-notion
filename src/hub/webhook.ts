@@ -193,11 +193,23 @@ export async function handleWebhook(
   }
 }
 
-/** 从 IncomingMessage 读取完整请求体（Buffer） */
+/** 请求体最大大小：1MB */
+const MAX_BODY_SIZE = 1_048_576;
+
+/** 从 IncomingMessage 读取完整请求体（Buffer），限制最大 1MB */
 function readBody(req: IncomingMessage): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => chunks.push(chunk));
+    let size = 0;
+    req.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > MAX_BODY_SIZE) {
+        req.destroy();
+        reject(new Error("请求体超过 1MB 限制"));
+        return;
+      }
+      chunks.push(chunk);
+    });
     req.on("end", () => resolve(Buffer.concat(chunks)));
     req.on("error", reject);
   });
