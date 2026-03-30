@@ -2,11 +2,11 @@
  * 应用主入口 — 微信 ↔ Notion 双向桥接服务
  *
  * 初始化流程：
- * 1. 加载配置 → 创建 Store → 创建 NotionClient
+ * 1. 加载配置 → 创建 Store → 创建 NotionClient（如果有凭证）
  * 2. 收集所有工具 → 创建 Router
- * 3. 初始化 WxToNotion + NotionToWx 桥接器
+ * 3. 初始化 WxToNotion + NotionToWx 桥接器（如果有凭证）
  * 4. 如果配置了 notionDatabaseId，启动 Notion 变更轮询
- * 5. 启动 HTTP Server，注册 5 个路由
+ * 5. 启动 HTTP Server，注册路由
  * 6. 监听 SIGINT/SIGTERM 优雅关闭
  */
 
@@ -22,6 +22,7 @@ import { NotionToWx } from "./bridge/notion-to-wx.js";
 import { startNotionPolling } from "./notion/event.js";
 import { handleWebhook } from "./hub/webhook.js";
 import { handleOAuthStart, handleOAuthCallback } from "./hub/oauth.js";
+import { handleSettingsPage, handleSettingsVerify, handleSettingsSave } from "./hub/settings.js";
 import { manifest } from "./hub/manifest.js";
 import { HubClient } from "./hub/client.js";
 import type { HubEvent, Installation } from "./hub/types.js";
@@ -30,35 +31,56 @@ import type { HubEvent, Installation } from "./hub/types.js";
 
 const config = loadConfig();
 const store = new Store(config.dbPath);
-const notionClient = new NotionClient(config.notionToken);
+
+// 初始化 Notion 客户端（如果环境变量中配置了 Notion Token）
+const hasNotionCredentials = !!config.notionToken;
+const notionClient = hasNotionCredentials
+  ? new NotionClient(config.notionToken)
+  : null;
+
+if (notionClient) {
+  console.log("[app] Notion 客户端初始化完成");
+} else {
+  console.log("[app] 未配置 Notion Token，跳过默认客户端初始化（云端托管模式，用户安装时填写）");
+}
 
 console.log(`[app] 启动 ${manifest.name} (${manifest.slug})`);
 console.log(`[app] Hub: ${config.hubUrl}`);
 console.log(`[app] 回调地址: ${config.baseUrl}`);
 
-// 收集所有 AI Tools 并创建路由器
-const { definitions, handlers } = collectAllTools(notionClient);
+// 收集所有 AI Tools 并创建路由器（如果没有默认客户端则用空 token 客户端仅收集定义）
+const toolsSdkClient = notionClient ?? new NotionClient("");
+const { definitions, handlers } = collectAllTools(toolsSdkClient);
 const router = new Router({ definitions, handlers, store });
 console.log(`[app] 已注册 ${definitions.length} 个工具`);
 
-// 桥接器
-const wxToNotion = new WxToNotion(notionClient, store, config.notionDatabaseId || undefined);
-const notionToWx = new NotionToWx(store);
+// 设置 manifest 的 URL 字段
+manifest.oauth_setup_url = `${config.baseUrl}/oauth/setup`;
+manifest.oauth_redirect_url = `${config.baseUrl}/oauth/redirect`;
+manifest.webhook_url = `${config.baseUrl}/hub/webhook`;
+
+// 桥接器（仅在配置了 Notion 凭证时启用）
+const wxToNotion = notionClient ? new WxToNotion(notionClient, store, config.notionDatabaseId || undefined) : null;
+const notionToWx = notionClient ? new NotionToWx(store) : null;
 
 // ─── Notion 变更轮询 ──────────────────────────────────────
 
 let pollingHandle: { stop: () => void } | null = null;
 
-if (config.notionDatabaseId) {
+if (notionClient && config.notionDatabaseId) {
   pollingHandle = startNotionPolling(
     notionClient,
     config.notionDatabaseId,
     async (changeEvent) => {
       const installations = store.getAllInstallations();
-      await notionToWx.handleNotionChange(changeEvent, installations);
+      if (notionToWx) {
+        await notionToWx.handleNotionChange(changeEvent, installations);
+      }
     },
   );
   console.log(`[app] Notion 轮询已启动，数据库=${config.notionDatabaseId}`);
+} else if (!notionClient) {
+  console.log("[app] 未配置 Notion 凭证，跳过 Notion 变更轮询");
 }
 
 // ─── Hub 事件处理 ─────────────────────────────────────────
@@ -91,6 +113,10 @@ async function onEvent(event: HubEvent): Promise<void> {
   switch (subType) {
     case "message": {
       // 微信消息 → 转发到 Notion
+      if (!wxToNotion) {
+        console.warn("[event] Notion 客户端未初始化，无法转发消息");
+        return;
+      }
       const wxEvent = {
         type: "message" as const,
         fromId: (eventData.from_id as string) || "",
@@ -149,9 +175,9 @@ async function requestHandler(req: IncomingMessage, res: ServerResponse): Promis
       return;
     }
 
-    // GET /oauth/setup — 启动 OAuth 安装流程
-    if (pathname === "/oauth/setup" && req.method === "GET") {
-      handleOAuthStart(req, res, oauthOpts);
+    // GET/POST /oauth/setup — 启动 OAuth 安装流程（GET 显示配置表单，POST 提交后跳转授权）
+    if (pathname === "/oauth/setup" && (req.method === "GET" || req.method === "POST")) {
+      await handleOAuthStart(req, res, oauthOpts);
       return;
     }
 
@@ -198,6 +224,24 @@ async function requestHandler(req: IncomingMessage, res: ServerResponse): Promis
       return;
     }
 
+    // GET /settings — 设置页面（输入 token 验证身份）
+    if (req.method === "GET" && pathname === "/settings") {
+      handleSettingsPage(req, res);
+      return;
+    }
+
+    // POST /settings/verify — 验证 token 后显示配置表单
+    if (req.method === "POST" && pathname === "/settings/verify") {
+      await handleSettingsVerify(req, res, config, store);
+      return;
+    }
+
+    // POST /settings/save — 保存修改后的配置
+    if (req.method === "POST" && pathname === "/settings/save") {
+      await handleSettingsSave(req, res, config, store);
+      return;
+    }
+
     // GET /manifest.json — 返回应用清单（含工具定义）
     if (pathname === "/manifest.json" && req.method === "GET") {
       const body = {
@@ -240,7 +284,7 @@ const server = createServer((req, res) => {
 
 server.listen(Number(config.port), () => {
   console.log(`[app] 服务已启动，监听端口 ${config.port}`);
-  console.log(`[app] 路由: POST /hub/webhook | GET /oauth/setup | GET /oauth/redirect | GET /manifest.json | GET /health`);
+  console.log(`[app] 路由: POST /hub/webhook | GET/POST /oauth/setup | GET /oauth/redirect | GET /settings | GET /manifest.json | GET /health`);
 
   // 启动时同步工具定义到所有已安装的 Hub 实例
   const installations = store.getAllInstallations();
