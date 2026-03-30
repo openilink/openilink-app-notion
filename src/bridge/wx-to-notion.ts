@@ -40,8 +40,8 @@ export interface HubEvent {
 /** 数据存储接口 */
 export interface Store {
   saveMessageLink(link: MessageLink): void | Promise<void>;
-  getMessageLinkByNotionPage(notionPageId: string): MessageLink | null | undefined | Promise<MessageLink | null | undefined>;
-  getLatestLinkByWxUser(wxUserId: string): MessageLink | null | undefined | Promise<MessageLink | null | undefined>;
+  getMessageLinkByNotionPage(notionPageId: string, installationId: string): MessageLink | null | undefined | Promise<MessageLink | null | undefined>;
+  getLatestLinkByWxUser(wxUserId: string, installationId: string): MessageLink | null | undefined | Promise<MessageLink | null | undefined>;
   getAllInstallations(): Installation[] | Promise<Installation[]>;
 }
 
@@ -92,8 +92,8 @@ export class WxToNotion {
       });
       const blockContent = `[${timeStr}] ${event.content}`;
 
-      // 查找该微信用户已有的消息关联
-      const existingLink = await this.store.getLatestLinkByWxUser(event.fromId);
+      // 查找该微信用户在当前安装实例下已有的消息关联
+      const existingLink = await this.store.getLatestLinkByWxUser(event.fromId, installation.id);
 
       if (existingLink) {
         // 已有页面，追加内容

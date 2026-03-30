@@ -132,21 +132,21 @@ export class Store {
     });
   }
 
-  /** 根据 Notion 页面 ID 查询关联记录 */
-  getMessageLinkByNotionPage(notionPageId: string): MessageLink | undefined {
+  /** 根据 Notion 页面 ID 和安装实例 ID 查询关联记录 */
+  getMessageLinkByNotionPage(notionPageId: string, installationId: string): MessageLink | undefined {
     const row = this.db
-      .prepare("SELECT * FROM message_links WHERE notion_page_id = ? ORDER BY created_at DESC LIMIT 1")
-      .get(notionPageId) as Record<string, unknown> | undefined;
+      .prepare("SELECT * FROM message_links WHERE notion_page_id = ? AND installation_id = ? ORDER BY created_at DESC LIMIT 1")
+      .get(notionPageId, installationId) as Record<string, unknown> | undefined;
 
     if (!row) return undefined;
     return this.rowToMessageLink(row);
   }
 
-  /** 根据微信用户 ID 查询最新一条关联记录 */
-  getLatestLinkByWxUser(wxUserId: string): MessageLink | undefined {
+  /** 根据微信用户 ID 和安装实例 ID 查询最新一条关联记录 */
+  getLatestLinkByWxUser(wxUserId: string, installationId: string): MessageLink | undefined {
     const row = this.db
-      .prepare("SELECT * FROM message_links WHERE wx_user_id = ? ORDER BY created_at DESC LIMIT 1")
-      .get(wxUserId) as Record<string, unknown> | undefined;
+      .prepare("SELECT * FROM message_links WHERE wx_user_id = ? AND installation_id = ? ORDER BY created_at DESC LIMIT 1")
+      .get(wxUserId, installationId) as Record<string, unknown> | undefined;
 
     if (!row) return undefined;
     return this.rowToMessageLink(row);

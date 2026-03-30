@@ -30,8 +30,17 @@ export class NotionToWx {
     installations: Installation[],
   ): Promise<void> {
     try {
-      // 查找该页面对应的消息关联
-      const link = await this.store.getMessageLinkByNotionPage(event.pageId);
+      // 遍历所有安装实例，查找该页面对应的消息关联
+      let link: MessageLink | null | undefined;
+      let installation: Installation | undefined;
+      for (const inst of installations) {
+        const found = await this.store.getMessageLinkByNotionPage(event.pageId, inst.id);
+        if (found) {
+          link = found;
+          installation = inst;
+          break;
+        }
+      }
 
       if (!link) {
         // 没有关联的微信用户，跳过
@@ -40,9 +49,6 @@ export class NotionToWx {
         );
         return;
       }
-
-      // 找到对应的安装实例
-      const installation = installations.find((i) => i.id === link.installationId);
       if (!installation) {
         console.warn(
           `[NotionToWx] 找不到安装实例 ${link.installationId}，无法发送通知`,
