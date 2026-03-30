@@ -153,6 +153,34 @@ async function requestHandler(req: IncomingMessage, res: ServerResponse): Promis
       return;
     }
 
+    // POST /oauth/redirect — 模式 2: Hub 直接安装通知
+    if (pathname === "/oauth/redirect" && req.method === "POST") {
+      const body = await new Promise<Buffer>((resolve, reject) => {
+        const chunks: Buffer[] = [];
+        req.on("data", (chunk: Buffer) => chunks.push(chunk));
+        req.on("end", () => resolve(Buffer.concat(chunks)));
+        req.on("error", reject);
+      });
+      const data = JSON.parse(body.toString());
+      store.saveInstallation({
+        id: data.installation_id,
+        hubUrl: data.hub_url || config.hubUrl,
+        appId: "",
+        botId: data.bot_id || "",
+        appToken: data.app_token,
+        webhookSecret: data.webhook_secret,
+        createdAt: new Date().toISOString(),
+      });
+      console.log("[oauth] 模式2安装成功, installation_id:", data.installation_id);
+      // 异步同步工具定义到 Hub
+      new HubClient(data.hub_url || config.hubUrl, data.app_token)
+        .syncTools(definitions)
+        .catch((err) => console.error("[oauth] 模式2同步工具失败:", err));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ webhook_url: `${config.baseUrl}/hub/webhook` }));
+      return;
+    }
+
     // GET /manifest.json — 返回应用清单（含工具定义）
     if (pathname === "/manifest.json" && req.method === "GET") {
       const body = {
