@@ -16,6 +16,8 @@ export interface AppManifest {
   description: string;
   /** 订阅的事件类型列表 */
   events: string[];
+  /** 所需权限范围 */
+  scopes: string[];
   /** 配置表单 JSON Schema */
   config_schema?: Record<string, unknown>;
   /** 安装引导说明（Markdown） */
@@ -29,6 +31,7 @@ export const manifest: AppManifest = {
   icon: "\uD83D\uDCDD",
   description: "微信 ↔ Notion 双向桥接，支持消息同步与 Notion AI Tools",
   events: ["message", "command"],
+  scopes: ["tools:write", "config:read"],
   config_schema: {
     type: "object",
     properties: {

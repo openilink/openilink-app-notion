@@ -119,9 +119,17 @@ async function onEvent(event: HubEvent): Promise<void> {
 /**
  * 处理 command 事件（同步/异步超时由 webhook 层控制）
  * 返回工具执行结果文本，null 表示无需回复
+ * 优先从本地加密配置中读取凭证
  */
 async function onCommand(event: HubEvent, _installation: Installation): Promise<string | null> {
   console.log(`[event] 收到 command 事件: id=${event.event?.id}, trace=${event.trace_id}`);
+
+  /** 尝试读取本地加密配置 */
+  const localCfg = store.getConfig(event.installation_id, _installation.appToken);
+  if (localCfg) {
+    console.log(`[app] 使用安装 ${event.installation_id} 的本地加密配置`);
+  }
+
   const result = await router.handleCommand(event);
   return result ?? null;
 }
@@ -172,9 +180,18 @@ async function requestHandler(req: IncomingMessage, res: ServerResponse): Promis
         createdAt: new Date().toISOString(),
       });
       console.log("[oauth] 模式2安装成功, installation_id:", data.installation_id);
+      // 安装后拉取配置并加密存储
+      const mode2Hub = new HubClient(data.hub_url || config.hubUrl, data.app_token);
+      mode2Hub.fetchConfig()
+        .then((remoteCfg) => {
+          if (Object.keys(remoteCfg).length > 0) {
+            store.saveConfig(data.installation_id, remoteCfg, data.app_token);
+            console.log("[oauth] 模式2: 已拉取并加密保存配置:", data.installation_id);
+          }
+        })
+        .catch((err) => console.error("[oauth] 模式2: 拉取配置失败:", err));
       // 异步同步工具定义到 Hub
-      new HubClient(data.hub_url || config.hubUrl, data.app_token)
-        .syncTools(definitions)
+      mode2Hub.syncTools(definitions)
         .catch((err) => console.error("[oauth] 模式2同步工具失败:", err));
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ webhook_url: `${config.baseUrl}/hub/webhook` }));
